@@ -3,13 +3,13 @@ var primitive = require('./types');
 var fs = require('fs');
 var path = require('path');
 
-function Compiler(filename) {
-  this.messages = {};
-  this.enums = {};
-  this.schema = this.open(filename);
+function Compiler(filename, importPaths) {
+  this.messages = {};	  this.messages = {};
+  this.enums = {};	  this.enums = {};
+  this.schema = this.open(filename);	  this.schema = this.open(filename, importPaths);
 }
 
-Compiler.prototype.open = function(filename) {
+Compiler.prototype.open = function(filename, importPaths) {
   if (!/\.proto$/i.test(filename) && !fs.existsSync(filename)) {
     filename += '.proto';
   }
@@ -17,8 +17,33 @@ Compiler.prototype.open = function(filename) {
   var schema = parseSchema(fs.readFileSync(filename, 'utf-8'));
   this.visit(schema, schema.package || '');
   
-  schema.imports.forEach(function(i) {
-    this.open(path.resolve(path.dirname(filename), i));
+  schema.imports.forEach(function(lib) {
+  var found = false;
+  for (var i=0, len=importPaths.length; i<len; i++) {
+      try {
+        try {
+          this.open(path.resolve(importPaths[i], lib), importPaths);
+          found = true;
+          break;
+        } catch (err) {
+          if (err.code === 'ENOENT') {
+            // Try with only the import filename
+            this.open(path.resolve(importPaths[i], path.basename(lib)), importPaths);
+            found = true;
+            continue;
+          }
+          throw(err);
+        }
+      } catch (err) {
+        if (err.code === 'ENOENT') {
+          continue;
+        }
+        throw(err);
+      }
+    }
+    if (!found) {
+      throw new Error(lib + ' could not be found in any of\n' + importPaths.map(function(p) { return '\t' + path.resolve(p, lib) }).join('\n'));
+    }
   }, this);
   
   return schema;
@@ -188,7 +213,7 @@ Compiler.prototype.compileMessage = function(message, root) {
   return res;
 };
 
-module.exports = function(filename, model) {
-  var compiler = new Compiler(filename);
+module.exports = function(filename, model, importPaths) {
+  var compiler = new Compiler(filename, importPaths);
   return compiler.compile(model);
 };
